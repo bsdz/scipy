@@ -3755,6 +3755,9 @@ class levy_stable_gen(rv_continuous):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
                     if intg_max.success:
                         intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
+                        if intg == np.nan:
+                            warnings.warn("Failed to calculate integral in zolotarev calculation " +
+                                  "for x=%s; alpha=%s; beta=%s" % (x, alpha, beta))
                         return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
                     else:
                         warnings.warn("Failed to find integration maximum in zolotarev calculation " +
