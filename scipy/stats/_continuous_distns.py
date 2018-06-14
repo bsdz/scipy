@@ -3724,10 +3724,14 @@ class levy_stable_gen(rv_continuous):
     
     @staticmethod
     def _pdf_single_value_best(x, alpha, beta):
-        if alpha == 1.:
+        if alpha == 1. and beta != 0:
             return levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
         else:
-            return levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
+            res = levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
+            if res == np.nan:
+                print("Failed to calculate integral in zolotarev calculation " +
+                                  "for x=%s; alpha=%s; beta=%s" % (x, alpha, beta))
+            return res
     
     @staticmethod
     def _pdf_single_value_cf_integrate(x, alpha, beta):

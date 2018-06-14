@@ -1524,9 +1524,10 @@ class TestLevyStable(object):
             # we reduce size of x to speed up computation as numerical integration slow.
             ['quadrature', None, 8, lambda r: (r['alpha'] > 0.25) & (npisin(r['x'], [-10,-5,0,5,10]))],
             
-            # zolatarev is accurate except at alpha==1
+            # zolatarev is accurate except at alpha==1, beta != 0
             ['zolotarev', None, 8, lambda r: r['alpha'] != 1],
-            ['zolotarev', None, 1, lambda r: r['alpha'] == 1],
+            ['zolotarev', None, 8, lambda r: (r['alpha'] == 1) & (r['beta'] == 0)],
+            ['zolotarev', None, 1, lambda r: (r['alpha'] == 1) & (r['beta'] != 0)],
             
             # fft accuracy reduces as alpha decreases, fails at low values of alpha and x=0
             ['fft', 0, 4, lambda r: r['alpha'] > 1],
