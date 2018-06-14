@@ -3724,10 +3724,14 @@ class levy_stable_gen(rv_continuous):
     
     @staticmethod
     def _pdf_single_value_best(x, alpha, beta):
-        if alpha == 1. and beta != 0.:
-            return levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
-        else:
-            return levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
+        if alpha != 1. or beta == 0.:
+            res = levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
+            if not np.isnan(res):
+                return res
+            else:
+                warnings.warn("Failed to calculate using zolotarev method " +
+                          "for x=%s; alpha=%s; beta=%s. Falling back to quadrature." % (x, alpha, beta))
+        return levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
     
     @staticmethod
     def _pdf_single_value_cf_integrate(x, alpha, beta):
@@ -3753,13 +3757,8 @@ class levy_stable_gen(rv_continuous):
 
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
-                    if intg_max.success:
-                        intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
-                        return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
-                    else:
-                        warnings.warn("Failed to find integration maximum in zolotarev calculation " +
-                                      "for x=%s; alpha=%s; beta=%s" % (x, alpha, beta))
-                        return np.nan
+                    intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
+                    return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
             elif x0 == zeta:
                 return sc.gamma(1+1/alpha)*np.cos(xi)/np.pi/((1+zeta**2)**(1/alpha/2))
             else:
