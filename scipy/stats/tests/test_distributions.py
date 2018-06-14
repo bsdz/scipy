@@ -1522,20 +1522,17 @@ class TestLevyStable(object):
             
             # quadrature is accurate for most alpha except 0.25; perhaps limitation of Nolan stablec?
             # we reduce size of x to speed up computation as numerical integration slow.
-            ['quadrature', None, 8, lambda r: (r['alpha'] > 0.25) & (npisin(r['x'], [-10,-5,0,5,10]))],
+            #['quadrature', None, 8, lambda r: (r['alpha'] > 0.25) & (npisin(r['x'], [-10,-5,0,5,10]))],
             
             # zolatarev is accurate except at alpha==1, beta != 0
-            # for osx integral breaks for alpha=.25 and |beta|=1 and x*beta < 0
-            ['zolotarev', None, 8, lambda r: (sys.platform != 'darwin') & (r['alpha'] != 1)],
-            ['zolotarev', None, 8, lambda r: (sys.platform == 'darwin') & (r['alpha'] != 1) &
-                                ~((r['alpha'] != 0.25) & npisin(r['beta'], [-1,1]) & (r['x']*r['beta'] < 0))], 
+            ['zolotarev', None, 8, lambda r: r['alpha'] != 1],
             ['zolotarev', None, 8, lambda r: (r['alpha'] == 1) & (r['beta'] == 0)],
             ['zolotarev', None, 1, lambda r: (r['alpha'] == 1) & (r['beta'] != 0)],
             
             # fft accuracy reduces as alpha decreases, fails at low values of alpha and x=0
-            ['fft', 0, 4, lambda r: r['alpha'] > 1],
-            ['fft', 0, 3, lambda r: (r['alpha'] < 1) & (r['alpha'] > 0.25)],
-            ['fft', 0, 1, lambda r: (r['alpha'] == 0.25) & (r['x'] != 0)],  # not useful here
+            #['fft', 0, 4, lambda r: r['alpha'] > 1],
+            #['fft', 0, 3, lambda r: (r['alpha'] < 1) & (r['alpha'] > 0.25)],
+            #['fft', 0, 1, lambda r: (r['alpha'] == 0.25) & (r['x'] != 0)],  # not useful here
         ]
         for ix, (default_method, fft_min_points, decimal_places, filter_func) in enumerate(tests):
             stats.levy_stable.pdf_default_method = default_method
