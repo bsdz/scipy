@@ -3725,13 +3725,17 @@ class levy_stable_gen(rv_continuous):
     @staticmethod
     def _pdf_single_value_best(x, alpha, beta):
         if alpha == 1. and beta != 0:
-            return levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
+            res = levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
         else:
             res = levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
-            if res == np.nan:
-                print("Failed to calculate integral in zolotarev calculation " +
-                                  "for x=%s; alpha=%s; beta=%s" % (x, alpha, beta))
-            return res
+        if res == np.nan:
+            em = "Failed to calculate integral in zolotarev calculation " +\
+                              "for x=%s; alpha=%s; beta=%s" % (x, alpha, beta)
+            import sys
+            print(em)
+            print(em, file=sys.stderr)
+            warnings.warn(em)
+        return res
     
     @staticmethod
     def _pdf_single_value_cf_integrate(x, alpha, beta):
@@ -3773,7 +3777,6 @@ class levy_stable_gen(rv_continuous):
                 return levy_stable_gen._pdf_single_value_zolotarev(-x, alpha, -beta)
         else:
             # since location zero, no need to reposition x for S_0 parameterization
-            xi = np.pi/2
             if beta != 0:
                 warnings.warn('Density calculation unstable for alpha=1 and beta!=0.' +
                               ' Use quadrature method instead.', RuntimeWarning)
@@ -3787,6 +3790,9 @@ class levy_stable_gen(rv_continuous):
                 
                 def f(theta):
                     return g(theta) * np.exp(-g(theta))
+                
+                def f1(theta):
+                    return V(theta) * np.exp(-np.exp(-np.pi * x / 2. / beta) * V(theta))
             
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-np.pi/2, np.pi/2])
@@ -3824,7 +3830,6 @@ class levy_stable_gen(rv_continuous):
                 
         else:
             # since location zero, no need to reposition x for S_0 parameterization
-            xi = np.pi/2
             if beta > 0:
                 
                 def V(theta):
