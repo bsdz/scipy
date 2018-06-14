@@ -19,6 +19,7 @@ from scipy._lib._numpy_compat import suppress_warnings
 import numpy
 import numpy as np
 from numpy import typecodes, array
+from numpy.lib.recfunctions import rec_append_fields
 from scipy import special
 from scipy.integrate import IntegrationWarning
 import scipy.stats as stats
@@ -1539,9 +1540,8 @@ class TestLevyStable(object):
             stats.levy_stable.pdf_fft_min_points_threshold = fft_min_points
             subdata = data[filter_func(data)] if filter_func is not None else data 
             p = stats.levy_stable.pdf(subdata['x'], subdata['alpha'], subdata['beta'], scale=1, loc=0)
-            from numpy.lib.recfunctions import rec_append_fields
             subdata2 = rec_append_fields(subdata, 'calc', p)
-            failures = subdata2[(np.abs(p-subdata['p']) >= 1.5*10.**(-2)) | np.isnan(p)]
+            failures = subdata2[(np.abs(p-subdata['p']) >= 1.5*10.**(-decimal_places)) | np.isnan(p)]
             assert_almost_equal(p, subdata['p'], decimal_places, "test %s failed with method '%s'\n%s" % (ix, default_method, failures), verbose=False)           
              
     def test_cdf_nolan_samples(self):
@@ -1577,7 +1577,9 @@ class TestLevyStable(object):
             stats.levy_stable.pdf_fft_min_points_threshold = fft_min_points
             subdata = data[filter_func(data)] if filter_func is not None else data     
             p = stats.levy_stable.cdf(subdata['x'], subdata['alpha'], subdata['beta'], scale=1, loc=0)
-            assert_almost_equal(p, subdata['p'], decimal_places, "test %s failed with method '%s'" % (ix, default_method))            
+            subdata2 = rec_append_fields(subdata, 'calc', p)
+            failures = subdata2[(np.abs(p-subdata['p']) >= 1.5*10.**(-decimal_places)) | np.isnan(p)]            
+            assert_almost_equal(p, subdata['p'], decimal_places, "test %s failed with method '%s'\n%s" % (ix, default_method, failures), verbose=False)           
 
     def test_pdf_alpha_equals_one_beta_non_zero(self):
         """ sample points extracted from Tables and Graphs of Stable Probability
