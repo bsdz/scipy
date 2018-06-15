@@ -3724,10 +3724,10 @@ class levy_stable_gen(rv_continuous):
     
     @staticmethod
     def _pdf_single_value_best(x, alpha, beta):
-        if alpha != 1. or beta == 0.:
-            return levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
-        else:
+        if alpha == 1.:
             return levy_stable_gen._pdf_single_value_cf_integrate(x, alpha, beta)
+        else:
+            return levy_stable_gen._pdf_single_value_zolotarev(x, alpha, beta)
     
     @staticmethod
     def _pdf_single_value_cf_integrate(x, alpha, beta):
@@ -3753,9 +3753,8 @@ class levy_stable_gen(rv_continuous):
 
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
-                    intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
-                    if np.isnan(intg): # on osx intg is nan when alpha=.25, |beta|=1 and x*beta<0
-                        return 0.
+                    kwargs = {} if np.isnan(intg_max.fun) else {"points": [intg_max.x]}
+                    intg = integrate.quad(f, -xi, np.pi/2, **kwargs)[0]
                     return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
             elif x0 == zeta:
                 return sc.gamma(1+1/alpha)*np.cos(xi)/np.pi/((1+zeta**2)**(1/alpha/2))
@@ -3791,23 +3790,25 @@ class levy_stable_gen(rv_continuous):
         """
         zeta = -beta*np.tan(np.pi*alpha/2.)
         if alpha != 1:
-            #x0 = x + zeta  # convert to S_0 parameterization
+            x0 = x + zeta  # convert to S_0 parameterization
             xi = np.arctan(-zeta)/alpha
             
             def V(theta):
                 return np.cos(alpha*xi)**(1/(alpha-1)) * \
                                 (np.cos(theta)/np.sin(alpha*(xi+theta)))**(alpha/(alpha-1)) * \
                                 (np.cos(alpha*xi+(alpha-1)*theta)/np.cos(theta))
-            if x > 0: # x0 > zeta
+            if x0 > zeta:
                 c_1 = 1 if alpha > 1 else .5 - xi/np.pi
                 
                 def f(theta):
-                    return np.exp(-V(theta)*x**(alpha/(alpha-1))) # np.exp(-V(theta)*(x0-zeta)**(alpha/(alpha-1)))
+                    return np.exp(-V(theta)*(x0-zeta)**(alpha/(alpha-1)))
 
                 with np.errstate(all="ignore"):
                     intg = integrate.quad(f, -xi, np.pi/2)[0]
+                    if np.isnan(intg):
+                        intg = integrate.quadrature(f, -xi, np.pi/2)[0]
                     return c_1 + np.sign(1-alpha) * intg / np.pi
-            elif x == 0: # x0 == zeta
+            elif x0 == zeta:
                 return .5 - xi/np.pi
             else:
                 return 1 - levy_stable_gen._cdf_single_value_zolotarev(-x, alpha, -beta)
