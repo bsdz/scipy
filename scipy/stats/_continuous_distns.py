@@ -3748,13 +3748,19 @@ class levy_stable_gen(rv_continuous):
                                 (np.cos(theta)/np.sin(alpha*(xi+theta)))**(alpha/(alpha-1)) * \
                                 (np.cos(alpha*xi+(alpha-1)*theta)/np.cos(theta))
             if x0 > zeta:
+                def g(theta):
+                    return V(theta)*np.real(np.complex(x0-zeta)**(alpha/(alpha-1)))
+                
                 def f(theta):
-                    return V(theta)*(x0-zeta)**(alpha/(alpha-1))*np.exp(-V(theta)*(x0-zeta)**(alpha/(alpha-1)))
+                    return g(theta) * np.exp(-g(theta))
 
+                # spare calculating integral on null set
+                if -xi == np.pi/2:
+                    return 0.
+                
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
-                    kwargs = {} if np.isnan(intg_max.fun) else {"points": [intg_max.x]}
-                    intg = integrate.quad(f, -xi, np.pi/2, **kwargs)[0]
+                    intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
                     return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
             elif x0 == zeta:
                 return sc.gamma(1+1/alpha)*np.cos(xi)/np.pi/((1+zeta**2)**(1/alpha/2))
@@ -3801,12 +3807,13 @@ class levy_stable_gen(rv_continuous):
                 c_1 = 1 if alpha > 1 else .5 - xi/np.pi
                 
                 def f(theta):
-                    return np.exp(-V(theta)*(x0-zeta)**(alpha/(alpha-1)))
+                    return np.exp(-V(theta)*np.real(np.complex(x0-zeta)**(alpha/(alpha-1))))
 
                 with np.errstate(all="ignore"):
-                    intg = integrate.quad(f, -xi, np.pi/2)[0]
-                    if np.isnan(intg):
-                        intg = integrate.quadrature(f, -xi, np.pi/2)[0]
+                    if -xi == np.pi/2:
+                        intg = 0
+                    else:
+                        intg = integrate.quad(f, -xi, np.pi/2)[0]
                     return c_1 + np.sign(1-alpha) * intg / np.pi
             elif x0 == zeta:
                 return .5 - xi/np.pi
