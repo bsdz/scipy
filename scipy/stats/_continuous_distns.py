@@ -3755,13 +3755,14 @@ class levy_stable_gen(rv_continuous):
                     return g(theta) * np.exp(-g(theta))
 
                 # spare calculating integral on null set
-                if -xi == np.pi/2:
+                # use isclose as macos is has fp differences
+                if np.isclose(-xi, np.pi/2):
                     return 0.
                 
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
                     intg_kwargs = {} 
-                    # on osx and windows quadpack less forgiving with points out
+                    # on windows quadpack less forgiving with points out
                     # of bounds
                     if intg_max.success and not np.isnan(intg_max.fun)\
                             and intg_max.x > -xi and intg_max.x < np.pi/2:
@@ -3816,7 +3817,9 @@ class levy_stable_gen(rv_continuous):
                     return np.exp(-V(theta)*np.real(np.complex(x0-zeta)**(alpha/(alpha-1))))
 
                 with np.errstate(all="ignore"):
-                    if -xi == np.pi/2:
+                    # spare calculating integral on null set
+                    # use isclose as macos is has fp differences
+                    if np.isclose(-xi, np.pi/2):
                         intg = 0
                     else:
                         intg = integrate.quad(f, -xi, np.pi/2)[0]
