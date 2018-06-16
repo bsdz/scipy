@@ -3760,7 +3760,13 @@ class levy_stable_gen(rv_continuous):
                 
                 with np.errstate(all="ignore"):
                     intg_max = optimize.minimize_scalar(lambda theta: -f(theta), bounds=[-xi, np.pi/2])
-                    intg = integrate.quad(f, -xi, np.pi/2, points=[intg_max.x])[0]
+                    intg_kwargs = {} 
+                    # on osx and windows quadpack less forgiving with points out
+                    # of bounds
+                    if intg_max.success and not np.isnan(intg_max.fun)\
+                            and intg_max.x > -xi and intg_max.x < np.pi/2:
+                        intg_kwargs["points"] = [intg_max.x]                     
+                    intg = integrate.quad(f, -xi, np.pi/2, **intg_kwargs)[0]
                     return alpha * intg / np.pi / np.abs(alpha-1) / (x0-zeta)
             elif x0 == zeta:
                 return sc.gamma(1+1/alpha)*np.cos(xi)/np.pi/((1+zeta**2)**(1/alpha/2))
