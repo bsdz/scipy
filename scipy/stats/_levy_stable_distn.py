@@ -85,7 +85,7 @@ def _pdf_single_value_cf_integrate(x, alpha, beta, **kwds):
     return (int1 + int2) / np.pi
 
 
-def _nolan_round_difficult_input(x, x0, alpha, beta, zeta, xi, **kwds):
+def _nolan_round_difficult_input(x, alpha, beta, **kwds):
     """Round difficult input values for Nolan's method in [NO]."""
     x_tol_near_zeta = kwds.get("piecewise_x_tol_near_zeta", 0.01)
     alpha_tol_near_one = kwds.get("piecewise_alpha_tol_near_one", 0.0075)
@@ -101,11 +101,8 @@ def _nolan_round_difficult_input(x, x0, alpha, beta, zeta, xi, **kwds):
     # It seems we need ~0.0075 here, perhaps due to scipy's parameterization
     if np.abs(alpha - 1) < alpha_tol_near_one:
         if alpha != 1.0:
-            # recompute quantities after alpha change
-            x += zeta  # need to shift x with scipy's parameterization
-            zeta = _nolan_zeta(1.0, beta)
-            xi = _nolan_xi(alpha, zeta)
-            x0 = x
+            # need to shift x with scipy's parameterization
+            x += _nolan_zeta(alpha, beta)
 
         alpha = 1.0
 
@@ -115,9 +112,6 @@ def _nolan_round_difficult_input(x, x0, alpha, beta, zeta, xi, **kwds):
     # That said, we need to avoid FP issues with *very* small beta
     if alpha == 1.0 and np.abs(beta) < alpha_one_beta_tol_near_zero:
         beta = 0.0
-
-        # recompute quantities after beta change
-        zeta = _nolan_zeta(alpha, beta)
 
     #   "8. When |x0-beta*tan(pi*alpha/2)| is small, the
     #   computations of the density and cumulative have numerical problems.
@@ -131,10 +125,15 @@ def _nolan_round_difficult_input(x, x0, alpha, beta, zeta, xi, **kwds):
     # We seem to have partially addressed this through re-expression of
     # g(theta) here, but it still needs to be used in some extreme cases.
     # It seems we need ~1e-2 here, perhaps due to scipy's parameterization
+
+    # recompute zeta due to potential parameter changes
+    zeta = _nolan_zeta(alpha, beta)
+    x0 = _nolan_S0_from_S1(x, alpha, zeta)
     if np.abs(x0 - zeta) < x_tol_near_zeta * alpha ** (1 / alpha):
         x0 = zeta
+        x = _nolan_S1_from_S0(x0, alpha, zeta)
 
-    return x, x0, alpha, beta, zeta, xi
+    return x, alpha, beta
 
 
 def _nolan_g(alpha, beta, x0, xi, zeta):
@@ -223,21 +222,34 @@ def _nolan_xi(alpha, zeta):
         return np.pi / 2
 
 
+def _nolan_S0_from_S1(x, alpha, zeta):
+    """Convert from Nolan's S_1 to S_0 parameterization [N0]."""
+    if alpha != 1:
+        return x + zeta
+    else:
+        return x
+
+
+def _nolan_S1_from_S0(x0, alpha, zeta):
+    """Convert from Nolan's S_0 to S_1 parameterization [N0]."""
+    if alpha != 1:
+        return x0 - zeta
+    else:
+        return x0
+
+
 def _pdf_single_value_piecewise(x, alpha, beta, **kwds):
     """Calculate pdf using Nolan's methods as detailed in [NO].
     """
     quad_eps = kwds.get("quad_eps", _QUAD_EPS)
 
+    x, alpha, beta = _nolan_round_difficult_input(
+        x, alpha, beta, **kwds
+    )
+
     zeta = _nolan_zeta(alpha, beta)
     xi = _nolan_xi(alpha, zeta)
-
-    # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
-    # parameterization
-    x0 = x + zeta if alpha != 1 else x
-
-    x, x0, alpha, beta, zeta, xi = _nolan_round_difficult_input(
-        x, x0, alpha, beta, zeta, xi, **kwds
-    )
+    x0 = _nolan_S0_from_S1(x, alpha, zeta)
 
     # handle Nolan's initial case logic with
     # some other known distribution pdfs / analytical cases
@@ -352,16 +364,13 @@ def _cdf_single_value_piecewise(x, alpha, beta, **kwds):
     """
     quad_eps = kwds.get("quad_eps", _QUAD_EPS)
 
+    x, alpha, beta = _nolan_round_difficult_input(
+        x, alpha, beta, **kwds
+    )
+
     zeta = _nolan_zeta(alpha, beta)
     xi = _nolan_xi(alpha, zeta)
-
-    # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
-    # parameterization
-    x0 = x + zeta if alpha != 1 else x
-
-    x, x0, alpha, beta, zeta, xi = _nolan_round_difficult_input(
-        x, x0, alpha, beta, zeta, xi, **kwds
-    )
+    x0 = _nolan_S0_from_S1(x, alpha, zeta)
 
     # handle Nolan's initial case logic
     if alpha == 1:
