@@ -11,8 +11,21 @@ from scipy import interpolate
 import scipy.special as sc
 from scipy._lib._util import _lazywhere
 from ._distn_infrastructure import rv_continuous
-from ._continuous_distns import uniform, expon, _norm_pdf
+from ._continuous_distns import uniform, expon, _norm_pdf, _norm_cdf
 from ._fft_char_fn import pdf_from_cf_with_fft
+
+# Stable distributions are known for various parameterisations
+# some being advantgous for numerical considerations and others
+# useful due to their location/scale awareness.
+#
+# Here we follow [NO] convention.
+#
+# S0 / x0 (aka Zoleterav's M)
+# S1 / x1
+#
+# Scipy's original Stable was a random variate generator. It
+# uses S1 and unfortunately is not a location/scale aware.
+
 
 # default numerical integration tolerance
 # used for epsrel in piecewise and both epsrel and epsabs in dni
@@ -20,7 +33,7 @@ from ._fft_char_fn import pdf_from_cf_with_fft
 _QUAD_EPS = 1.2e-14
 
 
-def Phi(alpha, t):
+def _Phi_S1(alpha, t):
     return (
         np.tan(np.pi * alpha / 2)
         if alpha != 1
@@ -28,14 +41,15 @@ def Phi(alpha, t):
     )
 
 
-def _cf(t, alpha, beta):
+def _cf_S1(t, alpha, beta):
     """Characteristic function."""
     return np.exp(
-        -(np.abs(t) ** alpha) * (1 - 1j * beta * np.sign(t) * Phi(alpha, t))
+        -(np.abs(t) ** alpha)
+        * (1 - 1j * beta * np.sign(t) * _Phi_S1(alpha, t))
     )
 
 
-def _pdf_single_value_cf_integrate(x, alpha, beta, **kwds):
+def _pdf_single_value_cf_integrate_S1(x, alpha, beta, **kwds):
     """To improve DNI accuracy convert characteristic function in to real
     valued integral using Euler's formula, then exploit cosine symmetry to
     change limits to [0, inf). Finally use cosine addition formula to split
@@ -47,17 +61,17 @@ def _pdf_single_value_cf_integrate(x, alpha, beta, **kwds):
         if t == 0:
             return 0
         return np.exp(-(t ** alpha)) * (
-            np.cos(beta * (t ** alpha) * Phi(alpha, t))
+            np.cos(beta * (t ** alpha) * _Phi_S1(alpha, t))
         )
 
     def integrand2(t):
         if t == 0:
             return 0
         return np.exp(-(t ** alpha)) * (
-            np.sin(beta * (t ** alpha) * Phi(alpha, t))
+            np.sin(beta * (t ** alpha) * _Phi_S1(alpha, t))
         )
 
-    with np.errstate(invalid='ignore'):
+    with np.errstate(invalid="ignore"):
         int1, *ret1 = integrate.quad(
             integrand1,
             0,
@@ -67,7 +81,7 @@ def _pdf_single_value_cf_integrate(x, alpha, beta, **kwds):
             limit=1000,
             epsabs=quad_eps,
             epsrel=quad_eps,
-            full_output=1
+            full_output=1,
         )
 
         int2, *ret2 = integrate.quad(
@@ -79,16 +93,16 @@ def _pdf_single_value_cf_integrate(x, alpha, beta, **kwds):
             limit=1000,
             epsabs=quad_eps,
             epsrel=quad_eps,
-            full_output=1
+            full_output=1,
         )
 
     return (int1 + int2) / np.pi
 
 
-def _nolan_round_difficult_input(x0, alpha, beta, zeta, **kwds):
+def _nolan_round_difficult_input(
+    x0, alpha, beta, zeta, x_tol_near_zeta, alpha_tol_near_one
+):
     """Round difficult input values for Nolan's method in [NO]."""
-    x_tol_near_zeta = kwds.get("piecewise_x_tol_near_zeta", 0.005)
-    alpha_tol_near_one = kwds.get("piecewise_alpha_tol_near_one", 0.005)
 
     # following Nolan's STABLE,
     #   "1. When 0 < |alpha-1| < 0.005, the program has numerical problems
@@ -193,29 +207,33 @@ def _nolan_c3(alpha):
         return 1 / np.pi
 
 
-def _pdf_single_value_piecewise(x, alpha, beta, **kwds):
-    """Calculate pdf using Nolan's methods as detailed in [NO].
-    """
-    quad_eps = kwds.get("quad_eps", _QUAD_EPS)
-
-    zeta = -beta * np.tan(np.pi * alpha / 2.0)
-    xi = np.arctan(-zeta) / alpha if alpha != 1 else np.pi / 2
-
+def _pdf_single_value_piecewise_S1(x, alpha, beta, **kwds):
     # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
     # parameterization
+
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
     x0 = x + zeta if alpha != 1 else x
 
+    return _pdf_single_value_piecewise_S0(x0, alpha, beta, **kwds)
+
+
+def _pdf_single_value_piecewise_S0(x0, alpha, beta, **kwds):
+
+    quad_eps = kwds.get("quad_eps", _QUAD_EPS)
+    x_tol_near_zeta = kwds.get("piecewise_x_tol_near_zeta", 0.005)
+    alpha_tol_near_one = kwds.get("piecewise_alpha_tol_near_one", 0.005)
+
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
     x0, alpha, beta = _nolan_round_difficult_input(
-        x0, alpha, beta, zeta, **kwds
+        x0, alpha, beta, zeta, x_tol_near_zeta, alpha_tol_near_one
     )
 
-    # handle Nolan's initial case logic with
     # some other known distribution pdfs / analytical cases
     # TODO: add more where possible with test coverage,
     # eg https://en.wikipedia.org/wiki/Stable_distribution#Other_analytic_cases
     if alpha == 2.0:
         # normal
-        return _norm_pdf(x / np.sqrt(2)) / np.sqrt(2)
+        return _norm_pdf(x0 / np.sqrt(2)) / np.sqrt(2)
     elif alpha == 0.5 and beta == 1.0:
         # levy
         # since S(1/2, 1, γ, δ; <x>) == S(1/2, 1, γ, δ+γ; <x0>).
@@ -230,8 +248,22 @@ def _pdf_single_value_piecewise(x, alpha, beta, **kwds):
         ) / np.sqrt(2 * np.pi * np.abs(x0) ** 3)
     elif alpha == 1.0 and beta == 0.0:
         # cauchy
-        return 1 / (1 + x ** 2) / np.pi
-    elif x0 == zeta:
+        return 1 / (1 + x0 ** 2) / np.pi
+
+    return _pdf_single_value_piecewise_post_rounding_S0(
+        x0, alpha, beta, quad_eps
+    )
+
+
+def _pdf_single_value_piecewise_post_rounding_S0(x0, alpha, beta, quad_eps):
+    """Calculate pdf using Nolan's methods as detailed in [NO].
+    """
+
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
+    xi = np.arctan(-zeta) / alpha if alpha != 1 else np.pi / 2
+
+    # handle Nolan's initial case logic
+    if x0 == zeta:
         return (
             sc.gamma(1 + 1 / alpha)
             * np.cos(xi)
@@ -239,7 +271,9 @@ def _pdf_single_value_piecewise(x, alpha, beta, **kwds):
             / ((1 + zeta ** 2) ** (1 / alpha / 2))
         )
     elif x0 < zeta:
-        return _pdf_single_value_piecewise(-x, alpha, -beta, **kwds)
+        return _pdf_single_value_piecewise_post_rounding_S0(
+            -x0, alpha, -beta, quad_eps
+        )
 
     # following Nolan, we may now assume
     #   x0 > zeta when alpha != 1
@@ -311,42 +345,70 @@ def _pdf_single_value_piecewise(x, alpha, beta, **kwds):
             limit=100,
             epsrel=quad_eps,
             epsabs=0,
-            full_output=1
+            full_output=1,
         )
 
     return c2 * intg
 
 
-def _cdf_single_value_piecewise(x, alpha, beta, **kwds):
+def _cdf_single_value_piecewise_S1(x, alpha, beta, **kwds):
+    # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
+    # parameterization
+
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
+    x0 = x + zeta if alpha != 1 else x
+
+    return _cdf_single_value_piecewise_S0(x0, alpha, beta, **kwds)
+
+
+def _cdf_single_value_piecewise_S0(x0, alpha, beta, **kwds):
+
+    quad_eps = kwds.get("quad_eps", _QUAD_EPS)
+    x_tol_near_zeta = kwds.get("piecewise_x_tol_near_zeta", 0.005)
+    alpha_tol_near_one = kwds.get("piecewise_alpha_tol_near_one", 0.005)
+
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
+    x0, alpha, beta = _nolan_round_difficult_input(
+        x0, alpha, beta, zeta, x_tol_near_zeta, alpha_tol_near_one
+    )
+
+    # some other known distribution cdfs / analytical cases
+    # TODO: add more where possible with test coverage,
+    # eg https://en.wikipedia.org/wiki/Stable_distribution#Other_analytic_cases
+    if alpha == 2.0:
+        # normal
+        return _norm_cdf(x0 / np.sqrt(2))
+    elif alpha == 0.5 and beta == 1.0:
+        # levy
+        # since S(1/2, 1, γ, δ; <x>) == S(1/2, 1, γ, δ+γ; <x0>).
+        _x = x0 + 1
+        return sc.erfc(np.sqrt(0.5 / _x))
+    elif alpha == 1.0 and beta == 0.0:
+        # cauchy
+        return 0.5 + np.arctan(x0) / np.pi
+
+    return _cdf_single_value_piecewise_post_rounding_S0(
+        x0, alpha, beta, quad_eps
+    )
+
+
+def _cdf_single_value_piecewise_post_rounding_S0(x0, alpha, beta, quad_eps):
     """Calculate cdf using Nolan's methods as detailed in [NO].
     """
-    quad_eps = kwds.get("quad_eps", _QUAD_EPS)
-
     zeta = -beta * np.tan(np.pi * alpha / 2.0)
     xi = np.arctan(-zeta) / alpha if alpha != 1 else np.pi / 2
 
-    # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
-    # parameterization
-    x0 = x + zeta if alpha != 1 else x
-
-    x0, alpha, beta = _nolan_round_difficult_input(
-        x0, alpha, beta, zeta, **kwds
-    )
-
     # handle Nolan's initial case logic
-    if alpha == 1:
-        if beta == 0:
-            return 0.5 + np.arctan(x) / np.pi
-        elif beta < 0:
-            # NOTE: Nolan's paper has a typo here!
-            # He states F(x) = 1 - F(x, alpha, -beta), but this is clearly
-            # incorrect since F(-infty) would be 1.0 in this case
-            # Indeed, the alpha != 1, x0 < zeta case is correct here.
-            return 1 - _cdf_single_value_piecewise(-x, alpha, -beta, **kwds)
+    if (alpha == 1 and beta < 0) or x0 < zeta:
+        # NOTE: Nolan's paper has a typo here!
+        # He states F(x) = 1 - F(x, alpha, -beta), but this is clearly
+        # incorrect since F(-infty) would be 1.0 in this case
+        # Indeed, the alpha != 1, x0 < zeta case is correct here.
+        return 1 - _cdf_single_value_piecewise_post_rounding_S0(
+            -x0, alpha, -beta, quad_eps
+        )
     elif x0 == zeta:
         return 0.5 - xi / np.pi
-    elif x0 < zeta:
-        return 1 - _cdf_single_value_piecewise(-x, alpha, -beta, **kwds)
 
     # following Nolan, we may now assume
     #   x0 > zeta when alpha != 1
@@ -398,10 +460,78 @@ def _cdf_single_value_piecewise(x, alpha, beta, **kwds):
             limit=100,
             epsrel=quad_eps,
             epsabs=0,
-            full_output=1
+            full_output=1,
         )
 
     return c1 + c3 * intg
+
+
+def _rvs_S0(alpha, beta, size, random_state):
+    zeta = -beta * np.tan(np.pi * alpha / 2.0)
+
+    X1 = _rvs_S1(alpha, beta, size, random_state)
+    if alpha != 1:
+        return X1 + zeta
+    return X1
+
+
+def _rvs_S1(alpha, beta, size=None, random_state=None):
+    """Simulate random variables using Nolan's methods as detailed in [NO].
+    """
+
+    def alpha1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
+        return 2 / np.pi * (np.pi / 2 + bTH) * tanTH - beta * np.log(
+            (np.pi / 2 * W * cosTH) / (np.pi / 2 + bTH)
+        )
+
+    def beta0func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
+        return (
+            W
+            / (cosTH / np.tan(aTH) + np.sin(TH))
+            * ((np.cos(aTH) + np.sin(aTH) * tanTH) / W) ** (1.0 / alpha)
+        )
+
+    def otherwise(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
+        # alpha is not 1 and beta is not 0
+        val0 = beta * np.tan(np.pi * alpha / 2)
+        th0 = np.arctan(val0) / alpha
+        val3 = W / (cosTH / np.tan(alpha * (th0 + TH)) + np.sin(TH))
+        res3 = val3 * (
+            (
+                np.cos(aTH)
+                + np.sin(aTH) * tanTH
+                - val0 * (np.sin(aTH) - np.cos(aTH) * tanTH)
+            )
+            / W
+        ) ** (1.0 / alpha)
+        return res3
+
+    def alphanot1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
+        res = _lazywhere(
+            beta == 0,
+            (alpha, beta, TH, aTH, bTH, cosTH, tanTH, W),
+            beta0func,
+            f2=otherwise,
+        )
+        return res
+
+    alpha = np.broadcast_to(alpha, size)
+    beta = np.broadcast_to(beta, size)
+    TH = uniform.rvs(
+        loc=-np.pi / 2.0, scale=np.pi, size=size, random_state=random_state
+    )
+    W = expon.rvs(size=size, random_state=random_state)
+    aTH = alpha * TH
+    bTH = beta * TH
+    cosTH = np.cos(TH)
+    tanTH = np.tan(TH)
+    res = _lazywhere(
+        alpha == 1,
+        (alpha, beta, TH, aTH, bTH, cosTH, tanTH, W),
+        alpha1func,
+        f2=alphanot1func,
+    )
+    return res
 
 
 class levy_stable_gen(rv_continuous):
@@ -520,59 +650,7 @@ class levy_stable_gen(rv_continuous):
     def _rvs(self, alpha, beta, size=None, random_state=None):
         """Simulate random variables using Nolan's methods as detailed in [NO].
         """
-        def alpha1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-            return 2 / np.pi * (np.pi / 2 + bTH) * tanTH - beta * np.log(
-                (np.pi / 2 * W * cosTH) / (np.pi / 2 + bTH)
-            )
-
-        def beta0func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-            return (
-                W
-                / (cosTH / np.tan(aTH) + np.sin(TH))
-                * ((np.cos(aTH) + np.sin(aTH) * tanTH) / W) ** (1.0 / alpha)
-            )
-
-        def otherwise(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-            # alpha is not 1 and beta is not 0
-            val0 = beta * np.tan(np.pi * alpha / 2)
-            th0 = np.arctan(val0) / alpha
-            val3 = W / (cosTH / np.tan(alpha * (th0 + TH)) + np.sin(TH))
-            res3 = val3 * (
-                (
-                    np.cos(aTH)
-                    + np.sin(aTH) * tanTH
-                    - val0 * (np.sin(aTH) - np.cos(aTH) * tanTH)
-                )
-                / W
-            ) ** (1.0 / alpha)
-            return res3
-
-        def alphanot1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-            res = _lazywhere(
-                beta == 0,
-                (alpha, beta, TH, aTH, bTH, cosTH, tanTH, W),
-                beta0func,
-                f2=otherwise,
-            )
-            return res
-
-        alpha = np.broadcast_to(alpha, size)
-        beta = np.broadcast_to(beta, size)
-        TH = uniform.rvs(
-            loc=-np.pi / 2.0, scale=np.pi, size=size, random_state=random_state
-        )
-        W = expon.rvs(size=size, random_state=random_state)
-        aTH = alpha * TH
-        bTH = beta * TH
-        cosTH = np.cos(TH)
-        tanTH = np.tan(TH)
-        res = _lazywhere(
-            alpha == 1,
-            (alpha, beta, TH, aTH, bTH, cosTH, tanTH, W),
-            alpha1func,
-            f2=alphanot1func,
-        )
-        return res
+        return _rvs_S1(alpha, beta, size, random_state)
 
     def _argcheck(self, alpha, beta):
         return (alpha > 0) & (alpha <= 2) & (beta <= 1) & (beta >= -1)
@@ -590,9 +668,9 @@ class levy_stable_gen(rv_continuous):
             self, "pdf_default_method", "piecewise"
         )
         if pdf_default_method_name in ("piecewise", "best", "zolotarev"):
-            pdf_single_value_method = _pdf_single_value_piecewise
+            pdf_single_value_method = _pdf_single_value_piecewise_S1
         elif pdf_default_method_name in ("dni", "quadrature"):
-            pdf_single_value_method = _pdf_single_value_cf_integrate
+            pdf_single_value_method = _pdf_single_value_cf_integrate_S1
         elif (
             pdf_default_method_name == "fft-simpson"
             or getattr(self, "pdf_fft_min_points_threshold", None) is not None
@@ -606,7 +684,7 @@ class levy_stable_gen(rv_continuous):
             ),
             "piecewise_alpha_tol_near_one": getattr(
                 self, "piecewise_alpha_tol_near_one", 0.005
-            )
+            ),
         }
 
         fft_grid_spacing = getattr(self, "pdf_fft_grid_spacing", 0.001)
@@ -675,7 +753,7 @@ class levy_stable_gen(rv_continuous):
                     )
 
                 density_x, density = pdf_from_cf_with_fft(
-                    lambda t: _cf(t, _alpha, _beta),
+                    lambda t: _cf_S1(t, _alpha, _beta),
                     h=h,
                     q=q,
                     level=fft_interpolation_level,
@@ -700,7 +778,7 @@ class levy_stable_gen(rv_continuous):
             self, "cdf_default_method", "piecewise"
         )
         if cdf_default_method_name == "piecewise":
-            cdf_single_value_method = _cdf_single_value_piecewise
+            cdf_single_value_method = _cdf_single_value_piecewise_S1
         elif cdf_default_method_name == "fft-simpson":
             cdf_single_value_method = None
 
@@ -711,7 +789,7 @@ class levy_stable_gen(rv_continuous):
             ),
             "piecewise_alpha_tol_near_one": getattr(
                 self, "piecewise_alpha_tol_near_one", 0.005
-            )
+            ),
         }
 
         fft_grid_spacing = getattr(self, "pdf_fft_grid_spacing", 0.001)
@@ -765,7 +843,7 @@ class levy_stable_gen(rv_continuous):
                 )
 
                 density_x, density = pdf_from_cf_with_fft(
-                    lambda t: _cf(t, _alpha, _beta),
+                    lambda t: _cf_S1(t, _alpha, _beta),
                     h=h,
                     q=q,
                     level=fft_interpolation_level,
