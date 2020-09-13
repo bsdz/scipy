@@ -2,6 +2,7 @@
 #
 
 import warnings
+from functools import partial
 
 import numpy as np
 
@@ -41,14 +42,6 @@ def _Phi_S0(alpha, t):
     )
 
 
-def _cf_S0(t, alpha, beta):
-    """Characteristic function."""
-    return np.exp(
-        -(np.abs(t) ** alpha)
-        * (1 - 1j * beta * np.sign(t) * _Phi_S0(alpha, t))
-    )
-
-
 def _Phi_S1(alpha, t):
     return (
         np.tan(np.pi * alpha / 2)
@@ -57,15 +50,18 @@ def _Phi_S1(alpha, t):
     )
 
 
-def _cf_S1(t, alpha, beta):
+def _cf(Phi, t, alpha, beta):
     """Characteristic function."""
     return np.exp(
-        -(np.abs(t) ** alpha)
-        * (1 - 1j * beta * np.sign(t) * _Phi_S1(alpha, t))
+        -(np.abs(t) ** alpha) * (1 - 1j * beta * np.sign(t) * Phi(alpha, t))
     )
 
 
-def _pdf_single_value_cf_integrate_S1(x, alpha, beta, **kwds):
+_cf_S0 = partial(_cf, _Phi_S0)
+_cf_S1 = partial(_cf, _Phi_S1)
+
+
+def _pdf_single_value_cf_integrate(Phi, x, alpha, beta, **kwds):
     """To improve DNI accuracy convert characteristic function in to real
     valued integral using Euler's formula, then exploit cosine symmetry to
     change limits to [0, inf). Finally use cosine addition formula to split
@@ -77,14 +73,14 @@ def _pdf_single_value_cf_integrate_S1(x, alpha, beta, **kwds):
         if t == 0:
             return 0
         return np.exp(-(t ** alpha)) * (
-            np.cos(beta * (t ** alpha) * _Phi_S1(alpha, t))
+            np.cos(beta * (t ** alpha) * Phi(alpha, t))
         )
 
     def integrand2(t):
         if t == 0:
             return 0
         return np.exp(-(t ** alpha)) * (
-            np.sin(beta * (t ** alpha) * _Phi_S1(alpha, t))
+            np.sin(beta * (t ** alpha) * Phi(alpha, t))
         )
 
     with np.errstate(invalid="ignore"):
@@ -113,6 +109,14 @@ def _pdf_single_value_cf_integrate_S1(x, alpha, beta, **kwds):
         )
 
     return (int1 + int2) / np.pi
+
+
+_pdf_single_value_cf_integrate_S0 = partial(
+    _pdf_single_value_cf_integrate, _Phi_S0
+)
+_pdf_single_value_cf_integrate_S1 = partial(
+    _pdf_single_value_cf_integrate, _Phi_S1
+)
 
 
 def _nolan_round_difficult_input(
@@ -482,15 +486,6 @@ def _cdf_single_value_piecewise_post_rounding_S0(x0, alpha, beta, quad_eps):
     return c1 + c3 * intg
 
 
-def _rvs_S0(alpha, beta, size, random_state):
-    zeta = -beta * np.tan(np.pi * alpha / 2.0)
-
-    X1 = _rvs_S1(alpha, beta, size, random_state)
-    if alpha != 1:
-        return X1 + zeta
-    return X1
-
-
 def _rvs_S1(alpha, beta, size=None, random_state=None):
     """Simulate random variables using Nolan's methods as detailed in [NO].
     """
@@ -825,12 +820,24 @@ class levy_stable_gen(rv_continuous):
             )
         return pz
 
-    def _rvs(self, alpha, beta, size=None, random_state=None):
+    def rvs(self, *args, **kwds):
+        X1 = super().rvs(*args, **kwds)
         if self._parameterization() == "S0":
-            _rvs = _rvs_S0
+            alpha, beta, gamma = (
+                kwds["alpha"],
+                kwds["beta"],
+                kwds["scale"],
+            )
+            if alpha != 1:
+                zeta = -beta * np.tan(np.pi * alpha / 2.0)
+                return X1 + gamma * zeta
+            else:
+                return X1 - (beta * 2 * gamma * np.log(gamma) / np.pi)
         elif self._parameterization() == "S1":
-            _rvs = _rvs_S1
-        return _rvs(alpha, beta, size, random_state)
+            return X1
+
+    def _rvs(self, alpha, beta, size=None, random_state=None):
+        return _rvs_S1(alpha, beta, size, random_state)
 
     def _argcheck(self, alpha, beta):
         return (alpha > 0) & (alpha <= 2) & (beta <= 1) & (beta >= -1)
@@ -838,8 +845,7 @@ class levy_stable_gen(rv_continuous):
     def _pdf(self, x, alpha, beta):
         if self._parameterization() == "S0":
             _pdf_single_value_piecewise = _pdf_single_value_piecewise_S0
-            # TODO!
-            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_S1
+            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_S0
             _cf = _cf_S0
         elif self._parameterization() == "S1":
             _pdf_single_value_piecewise = _pdf_single_value_piecewise_S1
