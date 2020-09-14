@@ -2255,6 +2255,22 @@ class TestGumbelL(object):
 
 
 class TestLevyStable(object):
+    @pytest.mark.slow
+    def test_rvs(self):
+        for param in ["S0", "S1"]:
+            # NOTE: skip alpha == 1.
+            for alpha in [.1, .5, 1.5, 1.9, 2]:
+                for beta in [-1., .5, 0, .5, 1.]:
+                    # check standardized and non-standardized
+                    for gamma, delta in [(1, 0), (3, 2)]:
+                        stats.levy_stable.parameterization = param
+                        ls = stats.levy_stable(
+                            alpha=alpha, beta=beta,
+                            scale=gamma, loc=delta)
+                        _, p = stats.kstest(
+                            ls.rvs(size=1500, random_state=1234), ls.cdf)
+                        assert_equal(p > 0.05, True)
+
     def test_fit(self):
         # construct data to have percentiles that match
         # example in McCulloch 1986.
