@@ -2258,8 +2258,7 @@ class TestLevyStable(object):
     @pytest.mark.slow
     def test_rvs(self):
         for param in ["S0", "S1"]:
-            # NOTE: skip alpha == 1.
-            for alpha in [.1, .5, 1.5, 1.9, 2]:
+            for alpha in [.1, .5, 1., 1.5, 1.9, 2]:
                 for beta in [-1., .5, 0, .5, 1.]:
                     # check standardized and non-standardized
                     for gamma, delta in [(1, 0), (3, 2)]:

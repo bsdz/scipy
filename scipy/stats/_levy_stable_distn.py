@@ -491,9 +491,9 @@ def _rvs_S1(alpha, beta, size=None, random_state=None):
     """
 
     def alpha1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-        return 2 / np.pi * (np.pi / 2 + bTH) * tanTH - beta * np.log(
+        return 2 / np.pi * ((np.pi / 2 + bTH) * tanTH - beta * np.log(
             (np.pi / 2 * W * cosTH) / (np.pi / 2 + bTH)
-        )
+        ))
 
     def beta0func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
         return (
