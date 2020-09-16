@@ -548,10 +548,11 @@ def _rvs_S1(alpha, beta, size=None, random_state=None):
 def _fitstart_S0(data):
     alpha, beta, delta1, gamma = _fitstart_S1(data)
 
+    # TODO: is this correct?
     if alpha != 1:
         delta0 = delta1 + beta * gamma * np.tan(np.pi * alpha / 2.0)
     else:
-        delta0 = delta1 + 2 * beta * gamma * np.ln(gamma) / np.pi
+        delta0 = delta1 + 2 * beta * gamma * np.log(gamma) / np.pi
 
     return alpha, beta, delta0, gamma
 
@@ -716,7 +717,7 @@ class levy_stable_gen(rv_continuous):
         \varphi(t, \alpha, \beta, c, \mu) =
         e^{it\mu -|ct|^{\alpha}(1-i\beta\operatorname{sign}(t)\Phi(\alpha, t))}
 
-    where:
+    where two different parameterizations are supported. The first :math:`S_1`:
 
     .. math::
 
@@ -724,6 +725,17 @@ class levy_stable_gen(rv_continuous):
                 \tan \left({\frac {\pi \alpha }{2}}\right)&\alpha \neq 1\\
                 -{\frac {2}{\pi }}\log |t|&\alpha =1
                 \end{cases}
+
+    The second :math:`S_0`:
+
+    .. math::
+
+        \Phi = \begin{cases}
+                -\tan \left({\frac {\pi \alpha }{2}}\right)(|t|^{1-\alpha}-1)
+                &\alpha \neq 1\\
+                -{\frac {2}{\pi }}\log |t|&\alpha =1
+                \end{cases}
+
 
     The probability density function for `levy_stable` is:
 
@@ -735,9 +747,12 @@ class levy_stable_gen(rv_continuous):
     closed form.
 
     For evaluation of pdf we use either Nolan's piecewise approach using
-    Zolotarev :math:`S_0` parameterization with integration, direct numerical
+    Zolotarev :math:`M` parameterization with integration, direct numerical
     integration of standard parameterization of characteristic function or FFT
     of characteristic function.
+
+    One can switch parameterizations by setting ``levy_stable.parameterization``
+    to either 'S0' or 'S1'. The default is 'S1'.
 
     The default method is 'piecewise' which uses Nolan's piecewise method. The
     default method can be changed by setting ``levy_stable.pdf_default_method``
@@ -810,6 +825,8 @@ class levy_stable_gen(rv_continuous):
     %(example)s
 
     """
+    def _argcheck(self, alpha, beta):
+        return (alpha > 0) & (alpha <= 2) & (beta <= 1) & (beta >= -1)
 
     def _parameterization(self):
         pz = getattr(self, "parameterization", "S1")
@@ -822,13 +839,17 @@ class levy_stable_gen(rv_continuous):
 
     def rvs(self, *args, **kwds):
         X1 = super().rvs(*args, **kwds)
+
+        discrete = kwds.pop('discrete', None)  # noqa
+        rndm = kwds.pop('random_state', None)  # noqa
+        (alpha, beta), delta, gamma, size = self._parse_args_rvs(*args, **kwds)
+
+        # shift location for this parameterisation (S1)
+        if alpha == 1.:
+            X1 = X1 + 2 * beta * gamma * np.log(gamma) / np.pi
+
         if self._parameterization() == "S0":
-            alpha, beta, gamma = (
-                kwds["alpha"],
-                kwds["beta"],
-                kwds["scale"],
-            )
-            if alpha != 1:
+            if alpha != 1.:
                 zeta = -beta * np.tan(np.pi * alpha / 2.0)
                 return X1 + gamma * zeta
             else:
@@ -839,8 +860,13 @@ class levy_stable_gen(rv_continuous):
     def _rvs(self, alpha, beta, size=None, random_state=None):
         return _rvs_S1(alpha, beta, size, random_state)
 
-    def _argcheck(self, alpha, beta):
-        return (alpha > 0) & (alpha <= 2) & (beta <= 1) & (beta >= -1)
+    def pdf(self, x, *args, **kwds):
+        if self._parameterization() == "S1":
+            # correct location for this parameterisation
+            (alpha, beta), delta, gamma = self._parse_args(*args, **kwds)
+            if alpha == 1.:
+                kwds["loc"] = delta + 2 * beta * gamma * np.log(gamma) / np.pi
+        return super().pdf(x, *args, **kwds)
 
     def _pdf(self, x, alpha, beta):
         if self._parameterization() == "S0":
@@ -959,6 +985,14 @@ class levy_stable_gen(rv_continuous):
                 data_out[data_mask] = f(_x)
 
         return data_out.T[0]
+
+    def cdf(self, x, *args, **kwds):
+        if self._parameterization() == "S1":
+            # correct location for this parameterisation
+            (alpha, beta), delta, gamma = self._parse_args(*args, **kwds)
+            if alpha == 1.:
+                kwds["loc"] = delta + 2 * beta * gamma * np.log(gamma) / np.pi
+        return super().cdf(x, *args, **kwds)
 
     def _cdf(self, x, alpha, beta):
         if self._parameterization() == "S0":
