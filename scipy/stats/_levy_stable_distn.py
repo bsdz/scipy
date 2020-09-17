@@ -16,13 +16,16 @@ from ._continuous_distns import uniform, expon, _norm_pdf, _norm_cdf
 from ._fft_char_fn import pdf_from_cf_with_fft
 
 # Stable distributions are known for various parameterisations
-# some being advantgous for numerical considerations and others
+# some being advantageous for numerical considerations and others
 # useful due to their location/scale awareness.
 #
 # Here we follow [NO] convention.
 #
-# S0 / x0 (aka Zoleterav's M)
-# S1 / x1
+# S0 / Z0 / x0 (aka Zoleterav's M)
+# S1 / Z1 / x1
+#
+# Where S* denotes parameterisation, Z* denotes standardized
+# version where gamma = 1, delta = 0 and x* denotes variable.
 #
 # Scipy's original Stable was a random variate generator. It
 # uses S1 and unfortunately is not a location/scale aware.
@@ -34,7 +37,7 @@ from ._fft_char_fn import pdf_from_cf_with_fft
 _QUAD_EPS = 1.2e-14
 
 
-def _Phi_S0(alpha, t):
+def _Phi_Z0(alpha, t):
     return (
         -np.tan(np.pi * alpha / 2) * (np.abs(t) ** (1 - alpha) - 1)
         if alpha != 1
@@ -42,7 +45,7 @@ def _Phi_S0(alpha, t):
     )
 
 
-def _Phi_S1(alpha, t):
+def _Phi_Z1(alpha, t):
     return (
         np.tan(np.pi * alpha / 2)
         if alpha != 1
@@ -57,8 +60,8 @@ def _cf(Phi, t, alpha, beta):
     )
 
 
-_cf_S0 = partial(_cf, _Phi_S0)
-_cf_S1 = partial(_cf, _Phi_S1)
+_cf_Z0 = partial(_cf, _Phi_Z0)
+_cf_Z1 = partial(_cf, _Phi_Z1)
 
 
 def _pdf_single_value_cf_integrate(Phi, x, alpha, beta, **kwds):
@@ -111,11 +114,11 @@ def _pdf_single_value_cf_integrate(Phi, x, alpha, beta, **kwds):
     return (int1 + int2) / np.pi
 
 
-_pdf_single_value_cf_integrate_S0 = partial(
-    _pdf_single_value_cf_integrate, _Phi_S0
+_pdf_single_value_cf_integrate_Z0 = partial(
+    _pdf_single_value_cf_integrate, _Phi_Z0
 )
-_pdf_single_value_cf_integrate_S1 = partial(
-    _pdf_single_value_cf_integrate, _Phi_S1
+_pdf_single_value_cf_integrate_Z1 = partial(
+    _pdf_single_value_cf_integrate, _Phi_Z1
 )
 
 
@@ -227,17 +230,17 @@ def _nolan_c3(alpha):
         return 1 / np.pi
 
 
-def _pdf_single_value_piecewise_S1(x, alpha, beta, **kwds):
+def _pdf_single_value_piecewise_Z1(x, alpha, beta, **kwds):
     # convert from Nolan's S_1 (aka S) to S_0 (aka Zolaterev M)
     # parameterization
 
     zeta = -beta * np.tan(np.pi * alpha / 2.0)
     x0 = x + zeta if alpha != 1 else x
 
-    return _pdf_single_value_piecewise_S0(x0, alpha, beta, **kwds)
+    return _pdf_single_value_piecewise_Z0(x0, alpha, beta, **kwds)
 
 
-def _pdf_single_value_piecewise_S0(x0, alpha, beta, **kwds):
+def _pdf_single_value_piecewise_Z0(x0, alpha, beta, **kwds):
 
     quad_eps = kwds.get("quad_eps", _QUAD_EPS)
     x_tol_near_zeta = kwds.get("piecewise_x_tol_near_zeta", 0.005)
@@ -486,14 +489,19 @@ def _cdf_single_value_piecewise_post_rounding_S0(x0, alpha, beta, quad_eps):
     return c1 + c3 * intg
 
 
-def _rvs_S1(alpha, beta, size=None, random_state=None):
+def _rvs_Z1(alpha, beta, size=None, random_state=None):
     """Simulate random variables using Nolan's methods as detailed in [NO].
     """
 
     def alpha1func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
-        return 2 / np.pi * ((np.pi / 2 + bTH) * tanTH - beta * np.log(
-            (np.pi / 2 * W * cosTH) / (np.pi / 2 + bTH)
-        ))
+        return (
+            2
+            / np.pi
+            * (
+                (np.pi / 2 + bTH) * tanTH
+                - beta * np.log((np.pi / 2 * W * cosTH) / (np.pi / 2 + bTH))
+            )
+        )
 
     def beta0func(alpha, beta, TH, aTH, bTH, cosTH, tanTH, W):
         return (
@@ -731,9 +739,9 @@ class levy_stable_gen(rv_continuous):
     .. math::
 
         \Phi = \begin{cases}
-                -\tan \left({\frac {\pi \alpha }{2}}\right)(|t|^{1-\alpha}-1)
+                -\tan \left({\frac {\pi \alpha }{2}}\right)(|ct|^{1-\alpha}-1)
                 &\alpha \neq 1\\
-                -{\frac {2}{\pi }}\log |t|&\alpha =1
+                -{\frac {2}{\pi }}\log |ct|&\alpha =1
                 \end{cases}
 
 
@@ -825,6 +833,7 @@ class levy_stable_gen(rv_continuous):
     %(example)s
 
     """
+
     def _argcheck(self, alpha, beta):
         return (alpha > 0) & (alpha <= 2) & (beta <= 1) & (beta >= -1)
 
@@ -840,16 +849,16 @@ class levy_stable_gen(rv_continuous):
     def rvs(self, *args, **kwds):
         X1 = super().rvs(*args, **kwds)
 
-        discrete = kwds.pop('discrete', None)  # noqa
-        rndm = kwds.pop('random_state', None)  # noqa
+        discrete = kwds.pop("discrete", None)  # noqa
+        rndm = kwds.pop("random_state", None)  # noqa
         (alpha, beta), delta, gamma, size = self._parse_args_rvs(*args, **kwds)
 
         # shift location for this parameterisation (S1)
-        if alpha == 1.:
+        if alpha == 1.0:
             X1 = X1 + 2 * beta * gamma * np.log(gamma) / np.pi
 
         if self._parameterization() == "S0":
-            if alpha != 1.:
+            if alpha != 1.0:
                 zeta = -beta * np.tan(np.pi * alpha / 2.0)
                 return X1 + gamma * zeta
             else:
@@ -858,25 +867,54 @@ class levy_stable_gen(rv_continuous):
             return X1
 
     def _rvs(self, alpha, beta, size=None, random_state=None):
-        return _rvs_S1(alpha, beta, size, random_state)
+        return _rvs_Z1(alpha, beta, size, random_state)
 
     def pdf(self, x, *args, **kwds):
-        if self._parameterization() == "S1":
-            # correct location for this parameterisation
+        # override base class version to correct
+        # location for S1 parameterization
+        if self._parameterization() == "S0":
+            return super().pdf(x, *args, **kwds)
+        elif self._parameterization() == "S1":
             (alpha, beta), delta, gamma = self._parse_args(*args, **kwds)
-            if alpha == 1.:
-                kwds["loc"] = delta + 2 * beta * gamma * np.log(gamma) / np.pi
-        return super().pdf(x, *args, **kwds)
+            if np.all(np.reshape(alpha, (1, -1))[0, :] != 1):
+                return super().pdf(x, *args, **kwds)
+            else:
+                # correct location for this parameterisation
+                x = np.reshape(x, (1, -1))[0, :]
+                x, alpha, beta = np.broadcast_arrays(x, alpha, beta)
+
+                data_in = np.dstack((x, alpha, beta))[0]
+                data_out = np.empty(shape=(len(data_in), 1))
+                # group data in unique arrays of alpha, beta pairs
+                uniq_param_pairs = np.unique(data_in[:, 1:], axis=0)
+                for pair in uniq_param_pairs:
+                    _alpha, _beta = pair
+                    _delta = (
+                        delta + 2 * _beta * gamma * np.log(gamma) / np.pi
+                        if _alpha == 1.0
+                        else delta
+                    )
+                    data_mask = np.all(data_in[:, 1:] == pair, axis=-1)
+                    _x = data_in[data_mask, 0]
+                    data_out[data_mask] = (
+                        super()
+                        .pdf(_x, _alpha, _beta, loc=_delta, scale=gamma)
+                        .reshape(len(_x), 1)
+                    )
+                output = data_out.T[0]
+                if output.shape == (1,):
+                    return output[0]
+                return output
 
     def _pdf(self, x, alpha, beta):
         if self._parameterization() == "S0":
-            _pdf_single_value_piecewise = _pdf_single_value_piecewise_S0
-            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_S0
-            _cf = _cf_S0
+            _pdf_single_value_piecewise = _pdf_single_value_piecewise_Z0
+            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_Z0
+            _cf = _cf_Z0
         elif self._parameterization() == "S1":
-            _pdf_single_value_piecewise = _pdf_single_value_piecewise_S1
-            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_S1
-            _cf = _cf_S1
+            _pdf_single_value_piecewise = _pdf_single_value_piecewise_Z1
+            _pdf_single_value_cf_integrate = _pdf_single_value_cf_integrate_Z1
+            _cf = _cf_Z1
 
         x = np.asarray(x).reshape(1, -1)[0, :]
 
@@ -987,20 +1025,50 @@ class levy_stable_gen(rv_continuous):
         return data_out.T[0]
 
     def cdf(self, x, *args, **kwds):
-        if self._parameterization() == "S1":
-            # correct location for this parameterisation
+        # override base class version to correct
+        # location for S1 parameterization
+        # NOTE: this is near identical to pdf() above
+        if self._parameterization() == "S0":
+            return super().cdf(x, *args, **kwds)
+        elif self._parameterization() == "S1":
             (alpha, beta), delta, gamma = self._parse_args(*args, **kwds)
-            if alpha == 1.:
-                kwds["loc"] = delta + 2 * beta * gamma * np.log(gamma) / np.pi
-        return super().cdf(x, *args, **kwds)
+            if np.all(np.reshape(alpha, (1, -1))[0, :] != 1):
+                return super().cdf(x, *args, **kwds)
+            else:
+                # correct location for this parameterisation
+                x = np.reshape(x, (1, -1))[0, :]
+                x, alpha, beta = np.broadcast_arrays(x, alpha, beta)
+
+                data_in = np.dstack((x, alpha, beta))[0]
+                data_out = np.empty(shape=(len(data_in), 1))
+                # group data in unique arrays of alpha, beta pairs
+                uniq_param_pairs = np.unique(data_in[:, 1:], axis=0)
+                for pair in uniq_param_pairs:
+                    _alpha, _beta = pair
+                    _delta = (
+                        delta + 2 * _beta * gamma * np.log(gamma) / np.pi
+                        if _alpha == 1.0
+                        else delta
+                    )
+                    data_mask = np.all(data_in[:, 1:] == pair, axis=-1)
+                    _x = data_in[data_mask, 0]
+                    data_out[data_mask] = (
+                        super()
+                        .cdf(_x, _alpha, _beta, loc=_delta, scale=gamma)
+                        .reshape(len(_x), 1)
+                    )
+                output = data_out.T[0]
+                if output.shape == (1,):
+                    return output[0]
+                return output
 
     def _cdf(self, x, alpha, beta):
         if self._parameterization() == "S0":
             _cdf_single_value_piecewise = _cdf_single_value_piecewise_S0
-            _cf = _cf_S0
+            _cf = _cf_Z0
         elif self._parameterization() == "S1":
             _cdf_single_value_piecewise = _cdf_single_value_piecewise_S1
-            _cf = _cf_S1
+            _cf = _cf_Z1
 
         x = np.asarray(x).reshape(1, -1)[0, :]
 
